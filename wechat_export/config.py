@@ -4,15 +4,33 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 
+def sudo_user():
+    if os.geteuid() == 0 and os.environ.get("SUDO_UID", "").isdigit():
+        import pwd
+        account = pwd.getpwuid(int(os.environ["SUDO_UID"]))
+        if account.pw_uid != 0:
+            return account
+    return None
+
+
+def expand_user(value):
+    value = str(value)
+    if value == "~" or value.startswith("~/"):
+        account = sudo_user()
+        home = Path(account.pw_dir) if account else Path.home()
+        return home / value[2:] if value != "~" else home
+    return Path(value).expanduser()
+
+
 def load_config(filename):
-    path = Path(filename).expanduser().resolve()
+    path = expand_user(filename).resolve()
     cfg = json.loads(path.read_text(encoding="utf-8"))
     for name in ("source", "keys", "decrypted", "exports"):
-        value = Path(cfg[name]).expanduser()
+        value = expand_user(cfg[name])
         cfg[name] = (path.parent / value).resolve() if not value.is_absolute() else value.resolve()
     cfg["timezone"] = ZoneInfo(cfg.get("timezone", "Asia/Shanghai"))
     if cfg.get("attachments"):
-        value = Path(cfg["attachments"]).expanduser()
+        value = expand_user(cfg["attachments"])
         cfg["attachments"] = (path.parent / value).resolve() if not value.is_absolute() else value.resolve()
     cfg.setdefault("database_globs", ["contact/contact.db", "message/message_*.db", "session/session.db"])
     cfg.setdefault("sqlcipher", "sqlcipher")
@@ -32,9 +50,17 @@ def database_files(cfg):
     return sorted({p for pattern in patterns for p in cfg["source"].glob(pattern) if p.is_file()})
 
 
-def private_dir(path):
+def private_dir(path, owner=None):
     path = Path(path)
-    path.mkdir(parents=True, exist_ok=True, mode=0o700)
+    missing = []
+    current = path
+    while not current.exists():
+        missing.append(current)
+        current = current.parent
+    for directory in reversed(missing):
+        directory.mkdir(mode=0o700)
+        if owner:
+            os.chown(directory, owner[0], owner[1])
     return path
 
 
@@ -43,10 +69,12 @@ def overlaps(left, right):
     return left == right or left in right.parents or right in left.parents
 
 
-def write_private(path, text):
+def write_private(path, text, owner=None):
     path = Path(path)
-    private_dir(path.parent)
+    private_dir(path.parent, owner=owner)
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
     fd = os.open(path, flags, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        if owner:
+            os.fchown(handle.fileno(), owner[0], owner[1])
         handle.write(text)

@@ -7,7 +7,7 @@ import re
 import struct
 from pathlib import Path
 
-from .config import write_private, database_files
+from .config import write_private, database_files, sudo_user
 
 
 def verify(key, page):
@@ -99,5 +99,7 @@ def extract(cfg, pid, raw=False):
         lldb.SBDebugger.Destroy(debugger)
     if len(found) != len(pages):
         raise RuntimeError(f"Only {len(found)}/{len(pages)} keys verified; no partial key file saved")
-    write_private(cfg["keys"], json.dumps(found, indent=2))
+    account = sudo_user()
+    owner = (account.pw_uid, account.pw_gid) if account else None
+    write_private(cfg["keys"], json.dumps(found, indent=2), owner=owner)
     return {"keys_saved": len(found)}

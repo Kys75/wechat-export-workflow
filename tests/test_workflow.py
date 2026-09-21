@@ -14,10 +14,11 @@ from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
+from types import SimpleNamespace
 
 import zstandard
 
-from wechat_export.config import load_config
+from wechat_export.config import load_config, write_private, expand_user
 from wechat_export.keys import candidates, verify
 from wechat_export.refresh import refresh, read_keys
 from wechat_export.store import Store, date_bound, table_name
@@ -180,6 +181,43 @@ class WorkflowTest(unittest.TestCase):
 
 
 class KeyTest(unittest.TestCase):
+    def test_sudo_config_uses_invoking_users_home(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            account = SimpleNamespace(pw_uid=12345, pw_gid=12346, pw_dir=str(root))
+            (root / "config.json").write_text(json.dumps({
+                "source": "~/source/db_storage", "keys": "~/state/keys.json",
+                "decrypted": "~/state/decrypted", "exports": "~/state/exports",
+                "attachments": "~/source/msg/file"}))
+            with patch("wechat_export.config.os.geteuid", return_value=0), \
+                 patch.dict(os.environ, {"SUDO_UID": "12345"}), \
+                 patch("pwd.getpwuid", return_value=account):
+                cfg = load_config("~/config.json")
+                self.assertEqual(cfg["keys"], root / "state/keys.json")
+                self.assertEqual(cfg["source"], root / "source/db_storage")
+                self.assertEqual(cfg["attachments"], root / "source/msg/file")
+
+    def test_sudo_handoff_changes_only_new_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output = root / "new" / "nested" / "keys.json"
+            with patch("wechat_export.config.os.chown") as chown, \
+                 patch("wechat_export.config.os.fchown") as fchown:
+                write_private(output, "synthetic", owner=(12345, 12346))
+                self.assertEqual([call.args[0] for call in chown.call_args_list],
+                                 [root / "new", root / "new/nested"])
+                self.assertEqual(fchown.call_args.args[1:], (12345, 12346))
+                self.assertEqual(output.stat().st_mode & 0o777, 0o600)
+                with self.assertRaises(FileExistsError):
+                    write_private(output, "replacement", owner=(12345, 12346))
+                self.assertEqual(output.read_text(), "synthetic")
+
+    def test_unprivileged_process_ignores_spurious_sudo_uid(self):
+        with patch("wechat_export.config.os.geteuid", return_value=12345), \
+             patch.dict(os.environ, {"SUDO_UID": "54321"}), \
+             patch("wechat_export.config.Path.home", return_value=Path("/synthetic/normal-home")):
+            self.assertEqual(expand_user("~/keys.json"), Path("/synthetic/normal-home/keys.json"))
+
     def test_ascii_and_raw_candidate_verification(self):
         key, salt = bytes(range(32)), bytes(range(16))
         page = salt + bytes((i % 251 for i in range(4016)))
