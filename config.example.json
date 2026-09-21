@@ -1,0 +1,10 @@
+{
+  "source": "~/Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files/REPLACE_ACCOUNT/db_storage",
+  "keys": "~/.local/share/wechat-export/keys.json",
+  "decrypted": "~/.local/share/wechat-export/decrypted",
+  "exports": "~/.local/share/wechat-export/exports",
+  "attachments": "",
+  "database_globs": ["contact/contact.db", "message/message_*.db", "session/session.db"],
+  "timezone": "Asia/Shanghai",
+  "sqlcipher": "sqlcipher"
+}

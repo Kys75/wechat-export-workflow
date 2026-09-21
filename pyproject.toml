@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wechat-export-workflow"
+version = "0.1.0"
+description = "Local WeChat 4.x database export workflow for macOS"
+requires-python = ">=3.11"
+dependencies = ["zstandard>=0.22,<1"]
+
+[project.optional-dependencies]
+mcp = ["fastmcp>=2,<3"]
+
+[project.scripts]
+wechat-export = "wechat_export.cli:main"
+wechat-export-mcp = "wechat_export.mcp_server:main"
+
+[tool.setuptools.packages.find]
+include = ["wechat_export*"]
